@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#F5F1E8" />
+  <title>SD → GC · Hudson Rail Link</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='%2300933C'/%3E%3C/svg%3E" />
+
+  <!-- Tailwind via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=IBM+Plex+Mono:wght@300;400;500&family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    body { font-family: 'Manrope', system-ui, sans-serif; background: #F5F1E8; }
+    @keyframes softPulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
+    .live-dot { animation: softPulse 2.4s ease-in-out infinite; }
+  </style>
+
+  <!-- React + Babel via CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useMemo } = React;
+
+    const schedule = [
+      { bus: [5, 49],  sd: [6, 3],   gc: [6, 32] },
+      { bus: [6, 20],  sd: [6, 34],  gc: [7, 2] },
+      { bus: [6, 46],  sd: [7, 1],   gc: [7, 33] },
+      { bus: [7, 4],   sd: [7, 20],  gc: [7, 53] },
+      { bus: [7, 29],  sd: [7, 45],  gc: [8, 16] },
+      { bus: [7, 49],  sd: [8, 8],   gc: [8, 39] },
+      { bus: [8, 19],  sd: [8, 36],  gc: [9, 4] },
+      { bus: [8, 41],  sd: [8, 58],  gc: [9, 26] },
+      { bus: [9, 6],   sd: [9, 22],  gc: [9, 52] },
+      { bus: [9, 41],  sd: [9, 55],  gc: [10, 25] },
+      { bus: [10, 2],  sd: [10, 16], gc: [10, 45] },
+      { bus: [10, 24], sd: [10, 38], gc: [11, 9] },
+      { bus: [11, 18], sd: [11, 32], gc: [12, 6] },
+      { bus: [12, 22], sd: [12, 36], gc: [13, 9] },
+      { bus: [13, 21], sd: [13, 35], gc: [14, 8] },
+      { bus: [13, 46], sd: [14, 0],  gc: [14, 28] },
+      { bus: [14, 20], sd: [14, 34], gc: [15, 8] },
+      { bus: [14, 46], sd: [15, 0],  gc: [15, 29] },
+      { bus: [15, 21], sd: [15, 35], gc: [16, 9] },
+      { bus: [15, 45], sd: [15, 59], gc: [16, 31] },
+      { bus: [16, 23], sd: [16, 37], gc: [17, 8] },
+      { bus: [16, 50], sd: [17, 4],  gc: [17, 36] },
+      { bus: [17, 22], sd: [17, 36], gc: [18, 7] },
+      { bus: [17, 56], sd: [18, 10], gc: [18, 42] },
+      { bus: [18, 27], sd: [18, 41], gc: [19, 11] },
+      { bus: [18, 52], sd: [19, 6],  gc: [19, 32] },
+      { bus: [19, 26], sd: [19, 40], gc: [20, 10] },
+      { bus: [20, 22], sd: [20, 36], gc: [21, 6] },
+      { bus: [21, 21], sd: [21, 35], gc: [22, 8] },
+      { bus: [22, 22], sd: [22, 36], gc: [23, 9] },
+      { bus: [23, 21], sd: [23, 35], gc: [24, 8] },
+    ];
+
+    const fmt12 = (t) => {
+      const h = t[0] % 24;
+      const h12 = h % 12 === 0 ? 12 : h % 12;
+      return `${h12}:${String(t[1]).padStart(2, '0')}`;
+    };
+    const ampm = (t) => ((t[0] % 24) >= 12 ? 'PM' : 'AM');
+    const mins = (t) => t[0] * 60 + t[1];
+
+    function HudsonRailLink() {
+      const [selectedIdx, setSelectedIdx] = useState(null);
+      const [now, setNow] = useState(new Date());
+
+      useEffect(() => {
+        const i = setInterval(() => setNow(new Date()), 30000);
+        return () => clearInterval(i);
+      }, []);
+
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+
+      const nextIdx = useMemo(() => {
+        for (let i = 0; i < schedule.length; i++) {
+          if (mins(schedule[i].bus) >= nowMin) return i;
+        }
+        return null;
+      }, [nowMin]);
+
+      const activeIdx = selectedIdx ?? nextIdx;
+      const active = activeIdx !== null ? schedule[activeIdx] : null;
+      const minsUntilBus = active ? mins(active.bus) - nowMin : null;
+      const isSelected = selectedIdx !== null;
+
+      const goPrev = () => {
+        if (activeIdx === null || activeIdx === 0) return;
+        setSelectedIdx(activeIdx - 1);
+      };
+      const goNext = () => {
+        if (activeIdx === null || activeIdx >= schedule.length - 1) return;
+        setSelectedIdx(activeIdx + 1);
+      };
+      const resetToNow = () => setSelectedIdx(null);
+
+      const dow = now.getDay();
+      const isWeekend = dow === 0 || dow === 6;
+
+      return (
+        <div className="min-h-screen bg-[#F5F1E8] text-[#1A1F2E]">
+          <div className="max-w-md mx-auto px-5 pt-8 pb-16">
+            <header className="mb-7">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#00933C] live-dot"></span>
+                <span className="text-[10px] uppercase tracking-[0.25em] text-[#6B7280]">
+                  Hudson Rail Link · {isWeekend ? 'Weekend (M–F shown)' : 'Mon–Fri'}
+                </span>
+              </div>
+              <h1 style={{ fontFamily: 'Fraunces, serif', fontWeight: 400, letterSpacing: '-0.02em' }} className="text-[2.4rem] leading-[1.05] text-[#1A1F2E]">
+                Spuyten Duyvil
+                <div className="text-[#9CA3AF] text-2xl mt-1">↓ Grand Central</div>
+              </h1>
+              <p className="text-[11px] text-[#6B7280] mt-3 font-light leading-relaxed">
+                Pickup at <span className="text-[#1A1F2E] font-medium">Henry Hudson Pkwy &amp; 236th St</span>
+              </p>
+            </header>
+
+            {active ? (
+              <div className="relative bg-white border border-[#E5E0D5] rounded-2xl p-6 mb-6 shadow-[0_1px_2px_rgba(26,31,46,0.04),0_8px_24px_-12px_rgba(26,31,46,0.12)]">
+                <div className="absolute top-0 left-5 right-5 h-px bg-gradient-to-r from-transparent via-[#00933C]/40 to-transparent"></div>
+
+                <div className="flex items-center justify-between mb-5">
+                  <span className="text-[10px] uppercase tracking-[0.25em] text-[#00933C] font-semibold">
+                    {isSelected ? 'Selected train' : 'Next up'}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {minsUntilBus !== null && minsUntilBus >= 0 && minsUntilBus <= 180 && !isSelected && (
+                      <span className="text-[10px] text-[#6B7280] mr-2">
+                        bus in {minsUntilBus < 1 ? '<1' : minsUntilBus}m
+                      </span>
+                    )}
+                    <button onClick={goPrev} disabled={activeIdx === 0} aria-label="Earlier train"
+                      className="w-8 h-8 rounded-full bg-[#F5F1E8] hover:bg-[#EDE6D4] disabled:opacity-30 disabled:hover:bg-[#F5F1E8] text-[#1A1F2E] text-sm flex items-center justify-center transition">←</button>
+                    <button onClick={goNext} disabled={activeIdx >= schedule.length - 1} aria-label="Later train"
+                      className="w-8 h-8 rounded-full bg-[#F5F1E8] hover:bg-[#EDE6D4] disabled:opacity-30 disabled:hover:bg-[#F5F1E8] text-[#1A1F2E] text-sm flex items-center justify-center transition">→</button>
+                    {isSelected && (
+                      <button onClick={resetToNow}
+                        className="ml-1 text-[10px] uppercase tracking-widest text-[#6B7280] hover:text-[#1A1F2E] px-1">now</button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mb-6">
+                  <div className="text-[10px] uppercase tracking-[0.2em] text-[#6B7280] mb-2">Be at the stop by</div>
+                  <div className="flex items-baseline gap-2">
+                    <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontWeight: 400, letterSpacing: '-0.02em' }} className="text-[3.5rem] leading-none text-[#1A1F2E]">
+                      {fmt12(active.bus)}
+                    </span>
+                    <span className="text-sm text-[#6B7280] uppercase tracking-wider">{ampm(active.bus)}</span>
+                  </div>
+                  <div className="text-[11px] text-[#6B7280] mt-2">Henry Hudson &amp; 236th</div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-5 pt-5 border-t border-[#EDE6D4]">
+                  <div>
+                    <div className="text-[9px] uppercase tracking-[0.2em] text-[#6B7280] mb-1.5">Train departs SD</div>
+                    <div className="flex items-baseline gap-1.5">
+                      <span style={{ fontFamily: 'IBM Plex Mono, monospace' }} className="text-xl text-[#1A1F2E]">{fmt12(active.sd)}</span>
+                      <span className="text-[10px] text-[#6B7280] uppercase">{ampm(active.sd)}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] uppercase tracking-[0.2em] text-[#6B7280] mb-1.5">Arrives GC</div>
+                    <div className="flex items-baseline gap-1.5">
+                      <span style={{ fontFamily: 'IBM Plex Mono, monospace' }} className="text-xl text-[#1A1F2E]">{fmt12(active.gc)}</span>
+                      <span className="text-[10px] text-[#6B7280] uppercase">{ampm(active.gc)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white border border-[#E5E0D5] rounded-2xl p-6 mb-6 text-center">
+                <div className="text-[10px] uppercase tracking-[0.25em] text-[#6B7280] mb-2">No more service today</div>
+                <div className="text-sm">First bus tomorrow: <span style={{ fontFamily: 'IBM Plex Mono, monospace' }}>5:49 AM</span></div>
+              </div>
+            )}
+
+            <div>
+              <div className="flex items-center justify-between mb-3 px-1">
+                <span className="text-[10px] uppercase tracking-[0.25em] text-[#6B7280] font-semibold">All departures</span>
+                <span className="text-[10px] text-[#9CA3AF]">tap to select</span>
+              </div>
+
+              <div className="bg-white border border-[#E5E0D5] rounded-xl overflow-hidden divide-y divide-[#EDE6D4]">
+                {schedule.map((t, i) => {
+                  const isActive = i === activeIdx;
+                  const isPast = mins(t.bus) < nowMin;
+                  return (
+                    <button key={i} onClick={() => setSelectedIdx(i === selectedIdx ? null : i)}
+                      className={`w-full text-left px-4 py-3.5 transition-colors border-l-[3px] ${
+                        isActive
+                          ? 'bg-[#F0F9F2] border-[#00933C]'
+                          : 'border-transparent hover:bg-[#FAF7EE] active:bg-[#F0F9F2]'
+                      } ${isPast && !isActive ? 'opacity-40' : ''}`}>
+                      <div className="grid grid-cols-3 gap-2 items-baseline">
+                        <div>
+                          <div className="text-[9px] uppercase tracking-[0.15em] text-[#9CA3AF] mb-0.5">Bus</div>
+                          <div style={{ fontFamily: 'IBM Plex Mono, monospace' }} className={`text-[15px] ${isActive ? 'text-[#00933C] font-medium' : 'text-[#1A1F2E]'}`}>
+                            {fmt12(t.bus)}<span className="text-[9px] text-[#9CA3AF] ml-1">{ampm(t.bus)}</span>
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[9px] uppercase tracking-[0.15em] text-[#9CA3AF] mb-0.5">Train</div>
+                          <div style={{ fontFamily: 'IBM Plex Mono, monospace' }} className="text-[15px] text-[#1A1F2E]">
+                            {fmt12(t.sd)}<span className="text-[9px] text-[#9CA3AF] ml-1">{ampm(t.sd)}</span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[9px] uppercase tracking-[0.15em] text-[#9CA3AF] mb-0.5">→ GC</div>
+                          <div style={{ fontFamily: 'IBM Plex Mono, monospace' }} className="text-[15px] text-[#1A1F2E]">
+                            {fmt12(t.gc)}<span className="text-[9px] text-[#9CA3AF] ml-1">{ampm(t.gc)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <footer className="mt-10 pt-5 border-t border-[#E5E0D5] text-[10px] text-[#9CA3AF] space-y-1 leading-relaxed">
+              <div>Source: MTA Hudson Rail Link schedule, effective Oct 6, 2025.</div>
+              <div>Mon–Fri only. Buy your ticket before boarding the train.</div>
+            </footer>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<HudsonRailLink />);
+  </script>
+</body>
+</html>
