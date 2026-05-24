@@ -33,7 +33,15 @@
   <script type="text/babel" data-presets="react">
     const { useState, useEffect, useMemo } = React;
 
-    const API_URL = 'https://mgaspari.github.io/rail-link-api/api/stops/henry-hudson-pkwy-236-st.json';
+    const API_BASE = 'https://mgaspari.github.io/rail-link-api/api';
+    const DEFAULT_STOP_ID = 'henry-hudson-pkwy-236-st';
+
+    // Hardcoded list used only if /index.json fails. Kept minimal — the API
+    // is the source of truth for stop names; this just lets the selector
+    // still render in fully offline mode.
+    const FALLBACK_STOPS = [
+      { id: 'henry-hudson-pkwy-236-st', name: 'Henry Hudson Pkwy. & 236 St.' },
+    ];
 
     const FALLBACK_SCHEDULE = [
       { bus: [5, 49],  sd: [6, 3],   gc: [6, 32] },
@@ -94,34 +102,28 @@
       const [schedule, setSchedule] = useState([]);
       const [source, setSource] = useState('loading'); // 'loading' | 'api' | 'fallback'
       const [fallbackReason, setFallbackReason] = useState(null);
+      const [stops, setStops] = useState(FALLBACK_STOPS);
+      const [stopId, setStopId] = useState(DEFAULT_STOP_ID);
 
       useEffect(() => {
         const i = setInterval(() => setNow(new Date()), 30000);
         return () => clearInterval(i);
       }, []);
 
+      // Fetch the list of stops once on mount.
       useEffect(() => {
         const ctrl = new AbortController();
         const timeout = setTimeout(() => ctrl.abort(), 5000);
         (async () => {
           try {
-            const res = await fetch(API_URL, { signal: ctrl.signal });
+            const res = await fetch(`${API_BASE}/index.json`, { signal: ctrl.signal });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            const weekday = data?.departures?.weekday;
-            if (!Array.isArray(weekday) || weekday.length === 0) {
-              throw new Error('Malformed payload');
+            if (Array.isArray(data?.stops) && data.stops.length > 0) {
+              setStops(data.stops);
             }
-            const mapped = weekday
-              .filter((e) => e && e.time && e.connecting_train && e.connecting_train.sd_departure && e.connecting_train.gc_arrival)
-              .map(mapApiEntry);
-            if (mapped.length === 0) throw new Error('No usable entries');
-            setSchedule(mapped);
-            setSource('api');
-          } catch (err) {
-            setSchedule(FALLBACK_SCHEDULE);
-            setSource('fallback');
-            setFallbackReason(err?.message || 'Unknown error');
+          } catch (_err) {
+            // Keep FALLBACK_STOPS — the schedule fetch handles its own fallback UI.
           } finally {
             clearTimeout(timeout);
           }
@@ -132,6 +134,54 @@
         };
       }, []);
 
+      // Reset any "selected train" pin when the user switches stops, so the
+      // card snaps back to "Next up" for the new schedule.
+      useEffect(() => {
+        setSelectedIdx(null);
+      }, [stopId]);
+
+      // Fetch the schedule for the currently-selected stop.
+      useEffect(() => {
+        const ctrl = new AbortController();
+        const timeout = setTimeout(() => ctrl.abort(), 5000);
+        setSource('loading');
+        (async () => {
+          try {
+            const res = await fetch(`${API_BASE}/stops/${stopId}.json`, { signal: ctrl.signal });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const weekday = data?.departures?.weekday;
+            if (!Array.isArray(weekday) || weekday.length === 0) {
+              throw new Error('Malformed payload');
+            }
+            const mapped = weekday
+              .filter((e) => e && e.time && e.direction === 'to-ny' && e.connecting_train && e.connecting_train.sd_departure && e.connecting_train.gc_arrival)
+              .map(mapApiEntry);
+            if (mapped.length === 0) throw new Error('No usable entries');
+            setSchedule(mapped);
+            setSource('api');
+            setFallbackReason(null);
+          } catch (err) {
+            // The hard-coded backup only matches the default stop. For any
+            // other stop the API is the only source of data, so we render
+            // an empty schedule and the banner explains why.
+            if (stopId === DEFAULT_STOP_ID) {
+              setSchedule(FALLBACK_SCHEDULE);
+            } else {
+              setSchedule([]);
+            }
+            setSource('fallback');
+            setFallbackReason(err?.message || 'Unknown error');
+          } finally {
+            clearTimeout(timeout);
+          }
+        })();
+        return () => {
+          clearTimeout(timeout);
+          ctrl.abort();
+        };
+      }, [stopId]);
+
       const nowMin = now.getHours() * 60 + now.getMinutes();
 
       const nextIdx = useMemo(() => {
@@ -139,7 +189,13 @@
           if (mins(schedule[i].bus) >= nowMin) return i;
         }
         return null;
-      }, [nowMin]);
+      }, [nowMin, schedule]);
+
+      const selectedStop = useMemo(
+        () => stops.find((s) => s.id === stopId) || { id: stopId, name: stopId },
+        [stops, stopId],
+      );
+      const stopDisplayName = selectedStop.name.replace(/\n/g, ' · ');
 
       const activeIdx = selectedIdx ?? nextIdx;
       const active = activeIdx !== null ? schedule[activeIdx] : null;
@@ -187,12 +243,40 @@
                 Spuyten Duyvil
                 <div className="text-[#9CA3AF] text-2xl mt-1">↓ Grand Central</div>
               </h1>
-              <p className="text-[11px] text-[#6B7280] mt-3 font-light leading-relaxed">
-                Pickup at <span className="text-[#1A1F2E] font-medium">Henry Hudson Pkwy &amp; 236th St</span>
-              </p>
+              <div className="mt-3">
+                <label htmlFor="stop-select" className="block text-[9px] uppercase tracking-[0.25em] text-[#9CA3AF] mb-1.5">
+                  Pickup stop
+                </label>
+                <div className="relative">
+                  <select
+                    id="stop-select"
+                    value={stopId}
+                    onChange={(e) => setStopId(e.target.value)}
+                    className="w-full appearance-none bg-white border border-[#E5E0D5] rounded-lg pl-3 pr-9 py-2.5 text-[13px] text-[#1A1F2E] font-medium focus:outline-none focus:border-[#00933C] focus:ring-2 focus:ring-[#00933C]/15 transition"
+                  >
+                    {stops.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name.replace(/\n/g, ' · ')}</option>
+                    ))}
+                  </select>
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#9CA3AF] text-xs">▾</span>
+                </div>
+              </div>
             </header>
 
-            {source === 'fallback' && (
+            {source === 'fallback' && schedule.length === 0 && (
+              <div
+                title={fallbackReason || undefined}
+                className="mb-4 px-3 py-2 rounded-lg bg-[#FBF3DD] border border-[#E8D9A8] text-[#7A5B17] text-[11px] leading-relaxed flex items-start gap-2"
+              >
+                <span className="mt-[3px] w-1.5 h-1.5 rounded-full bg-[#C99A1F] shrink-0"></span>
+                <span>
+                  <span className="uppercase tracking-[0.18em] text-[10px] font-semibold">No data</span>
+                  <span className="block opacity-80">Live schedule unavailable for this stop.</span>
+                </span>
+              </div>
+            )}
+
+            {source === 'fallback' && schedule.length > 0 && (
               <div
                 title={fallbackReason ? `Live schedule unavailable: ${fallbackReason}` : 'Live schedule unavailable'}
                 className="mb-4 px-3 py-2 rounded-lg bg-[#FBF3DD] border border-[#E8D9A8] text-[#7A5B17] text-[11px] leading-relaxed flex items-start gap-2"
@@ -238,7 +322,7 @@
                     </span>
                     <span className="text-sm text-[#6B7280] uppercase tracking-wider">{ampm(active.bus)}</span>
                   </div>
-                  <div className="text-[11px] text-[#6B7280] mt-2">Henry Hudson &amp; 236th</div>
+                  <div className="text-[11px] text-[#6B7280] mt-2">{stopDisplayName}</div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-5 pt-5 border-t border-[#EDE6D4]">
@@ -258,12 +342,12 @@
                   </div>
                 </div>
               </div>
-            ) : (
+            ) : schedule.length > 0 ? (
               <div className="bg-white border border-[#E5E0D5] rounded-2xl p-6 mb-6 text-center">
                 <div className="text-[10px] uppercase tracking-[0.25em] text-[#6B7280] mb-2">No more service today</div>
-                <div className="text-sm">First bus tomorrow: <span style={{ fontFamily: 'IBM Plex Mono, monospace' }}>5:49 AM</span></div>
+                <div className="text-sm">First bus tomorrow: <span style={{ fontFamily: 'IBM Plex Mono, monospace' }}>{fmt12(schedule[0].bus)} {ampm(schedule[0].bus)}</span></div>
               </div>
-            )}
+            ) : null}
 
             <div>
               <div className="flex items-center justify-between mb-3 px-1">
