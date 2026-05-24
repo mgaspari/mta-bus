@@ -76,8 +76,8 @@
 
     const mapApiEntry = (e) => ({
       bus: parseHM(e.time),
-      sd: parseHM(e.sd_arrival),
-      gc: parseHM(e.gc_arrival),
+      sd: parseHM(e.connecting_train.sd_departure),
+      gc: parseHM(e.connecting_train.gc_arrival),
     });
 
     const fmt12 = (t) => {
@@ -113,7 +113,7 @@
               throw new Error('Malformed payload');
             }
             const mapped = weekday
-              .filter((e) => e && e.time && e.sd_arrival && e.gc_arrival)
+              .filter((e) => e && e.time && e.connecting_train && e.connecting_train.sd_departure && e.connecting_train.gc_arrival)
               .map(mapApiEntry);
             if (mapped.length === 0) throw new Error('No usable entries');
             setSchedule(mapped);
