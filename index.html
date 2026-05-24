@@ -33,7 +33,9 @@
   <script type="text/babel" data-presets="react">
     const { useState, useEffect, useMemo } = React;
 
-    const schedule = [
+    const API_URL = 'https://mgaspari.github.io/rail-link-api/api/stops/henry-hudson-pkwy-236-st.json';
+
+    const FALLBACK_SCHEDULE = [
       { bus: [5, 49],  sd: [6, 3],   gc: [6, 32] },
       { bus: [6, 20],  sd: [6, 34],  gc: [7, 2] },
       { bus: [6, 46],  sd: [7, 1],   gc: [7, 33] },
@@ -67,6 +69,17 @@
       { bus: [23, 21], sd: [23, 35], gc: [24, 8] },
     ];
 
+    const parseHM = (s) => {
+      const [h, m] = s.split(':').map(Number);
+      return [h, m];
+    };
+
+    const mapApiEntry = (e) => ({
+      bus: parseHM(e.time),
+      sd: parseHM(e.sd_arrival),
+      gc: parseHM(e.gc_arrival),
+    });
+
     const fmt12 = (t) => {
       const h = t[0] % 24;
       const h12 = h % 12 === 0 ? 12 : h % 12;
@@ -78,10 +91,45 @@
     function HudsonRailLink() {
       const [selectedIdx, setSelectedIdx] = useState(null);
       const [now, setNow] = useState(new Date());
+      const [schedule, setSchedule] = useState([]);
+      const [source, setSource] = useState('loading'); // 'loading' | 'api' | 'fallback'
+      const [fallbackReason, setFallbackReason] = useState(null);
 
       useEffect(() => {
         const i = setInterval(() => setNow(new Date()), 30000);
         return () => clearInterval(i);
+      }, []);
+
+      useEffect(() => {
+        const ctrl = new AbortController();
+        const timeout = setTimeout(() => ctrl.abort(), 5000);
+        (async () => {
+          try {
+            const res = await fetch(API_URL, { signal: ctrl.signal });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const weekday = data?.departures?.weekday;
+            if (!Array.isArray(weekday) || weekday.length === 0) {
+              throw new Error('Malformed payload');
+            }
+            const mapped = weekday
+              .filter((e) => e && e.time && e.sd_arrival && e.gc_arrival)
+              .map(mapApiEntry);
+            if (mapped.length === 0) throw new Error('No usable entries');
+            setSchedule(mapped);
+            setSource('api');
+          } catch (err) {
+            setSchedule(FALLBACK_SCHEDULE);
+            setSource('fallback');
+            setFallbackReason(err?.message || 'Unknown error');
+          } finally {
+            clearTimeout(timeout);
+          }
+        })();
+        return () => {
+          clearTimeout(timeout);
+          ctrl.abort();
+        };
       }, []);
 
       const nowMin = now.getHours() * 60 + now.getMinutes();
@@ -111,6 +159,20 @@
       const dow = now.getDay();
       const isWeekend = dow === 0 || dow === 6;
 
+      if (source === 'loading') {
+        return (
+          <div className="min-h-screen bg-[#F5F1E8] text-[#1A1F2E]">
+            <div className="max-w-md mx-auto px-5 pt-8 pb-16">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#9CA3AF] live-dot"></span>
+                <span className="text-[10px] uppercase tracking-[0.25em] text-[#6B7280]">Loading schedule…</span>
+              </div>
+              <div className="h-24 rounded-2xl bg-white border border-[#E5E0D5] animate-pulse"></div>
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className="min-h-screen bg-[#F5F1E8] text-[#1A1F2E]">
           <div className="max-w-md mx-auto px-5 pt-8 pb-16">
@@ -129,6 +191,19 @@
                 Pickup at <span className="text-[#1A1F2E] font-medium">Henry Hudson Pkwy &amp; 236th St</span>
               </p>
             </header>
+
+            {source === 'fallback' && (
+              <div
+                title={fallbackReason ? `Live schedule unavailable: ${fallbackReason}` : 'Live schedule unavailable'}
+                className="mb-4 px-3 py-2 rounded-lg bg-[#FBF3DD] border border-[#E8D9A8] text-[#7A5B17] text-[11px] leading-relaxed flex items-start gap-2"
+              >
+                <span className="mt-[3px] w-1.5 h-1.5 rounded-full bg-[#C99A1F] shrink-0"></span>
+                <span>
+                  <span className="uppercase tracking-[0.18em] text-[10px] font-semibold">Offline backup</span>
+                  <span className="block opacity-80">Live API unavailable — showing built-in schedule.</span>
+                </span>
+              </div>
+            )}
 
             {active ? (
               <div className="relative bg-white border border-[#E5E0D5] rounded-2xl p-6 mb-6 shadow-[0_1px_2px_rgba(26,31,46,0.04),0_8px_24px_-12px_rgba(26,31,46,0.12)]">
@@ -234,7 +309,11 @@
             </div>
 
             <footer className="mt-10 pt-5 border-t border-[#E5E0D5] text-[10px] text-[#9CA3AF] space-y-1 leading-relaxed">
-              <div>Source: MTA Hudson Rail Link schedule, effective Oct 6, 2025.</div>
+              <div>
+                Source: MTA Hudson Rail Link schedule, effective Oct 6, 2025.
+                {source === 'fallback' && <span className="ml-1 text-[#C99A1F]">· Cached</span>}
+                {source === 'api' && <span className="ml-1 text-[#00933C]">· Live</span>}
+              </div>
               <div>Mon–Fri only. Buy your ticket before boarding the train.</div>
             </footer>
           </div>
